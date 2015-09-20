@@ -1,5 +1,10 @@
 #include <IRremote.h>
 
+
+const int ULTRASONIC_TRIGGER = 2;
+const int ULTRASONIC_ECHO = 3;
+unsigned long ULTRASONIC_LAST = 0;
+
 // Specify the ULN2003 IN1,IN2,IN3,IN4 mapping to Arduino 8,9,10,11
 const int MOTOR1PIN1 = 8;
 const int MOTOR1PIN2 = 9;
@@ -30,7 +35,7 @@ const long SIGNALS[SIGNALS_LENGTH] = {
   SIGNAL_FORWARD, SIGNAL_BACKWARD, SIGNAL_LEFT, SIGNAL_RIGHT, SIGNAL_POWER
 };
 // define the pin number which receive Infrared signal
-const int RECV_PIN = 12; 
+const int IR_PIN = 12; 
 // cache the previous signal we received.
 long _CurSignal = 0x00000000;
 // if power is off, we don't handle infrared signal. 0: off 1: on
@@ -38,13 +43,15 @@ int _PowerOn = 0;
 
 unsigned long _Last = millis();
 
-IRrecv _Irrecv(RECV_PIN);
+IRrecv _Irrecv(IR_PIN);
 decode_results _Results;
 
 // use this value to trace the current step for stepper
 int _CurPhase = 0; 
 
 void setup() {
+  pinMode(ULTRASONIC_TRIGGER, OUTPUT);
+  pinMode(ULTRASONIC_ECHO, INPUT);
   pinMode(MOTOR1PIN1, OUTPUT);
   pinMode(MOTOR1PIN2, OUTPUT);
   pinMode(MOTOR1PIN3, OUTPUT);
@@ -54,7 +61,7 @@ void setup() {
   pinMode(MOTOR2PIN3, OUTPUT);
   pinMode(MOTOR2PIN4, OUTPUT);
   
-  pinMode(RECV_PIN, INPUT);
+  pinMode(IR_PIN, INPUT);
   // Start the receiver  
   _Irrecv.enableIRIn(); 
   Serial.begin(9600);
@@ -74,7 +81,26 @@ void handleSignal() {
   }
 }
 
+
+float getDistance() {
+  digitalWrite(ULTRASONIC_TRIGGER, LOW);
+  delayMicroseconds(5);
+  digitalWrite(ULTRASONIC_TRIGGER, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(ULTRASONIC_TRIGGER, LOW);
+  
+  float distance = pulseIn(ULTRASONIC_ECHO, HIGH);
+  distance *= 0.01657;
+  
+  Serial.print(distance);
+  Serial.println(" cm");
+  //delay(50);
+  return distance;
+}
+
+
 void loop() {
+  
   handleSignal();  // check if recieve next signal
   
   // if power button is clicked, toggle power status
@@ -85,6 +111,20 @@ void loop() {
   }
   
   if (_PowerOn) {
+    // check distance every 1/4 second
+    if (millis()- ULTRASONIC_LAST > 50) {
+      float distance = getDistance();  // check distance from the front object
+      
+      if (distance >= 25.0) {
+        _CurSignal = SIGNAL_FORWARD;
+        
+      } else {
+        _CurSignal = SIGNAL_LEFT;
+      }
+      
+      ULTRASONIC_LAST = millis();
+    }
+    
     // Drive motor in sequences between step1 to step8
     _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
     switch(_CurSignal) {
@@ -133,7 +173,7 @@ long dumpSignal(decode_results *results) {
 
 // We place the two stepper in opposite direction, so we need to
 // drive it in the opposite direction too
-void forward(int phase) {
+void backward(int phase) {
   switch(phase) {
     case 0:
       step8(MOTOR1PIN1, MOTOR1PIN2, MOTOR1PIN3, MOTOR1PIN4);
@@ -173,7 +213,7 @@ void forward(int phase) {
   delay(MOTORSPEED);
 }
 
-void backward(int phase) {
+void forward(int phase) {
   switch(phase) {
     case 0:
       step1(MOTOR1PIN1, MOTOR1PIN2, MOTOR1PIN3, MOTOR1PIN4);
