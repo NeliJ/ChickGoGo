@@ -49,6 +49,21 @@ decode_results _Results;
 // use this value to trace the current step for stepper
 int _CurPhase = 0; 
 
+
+
+//http://42bots.com/tutorials/28byj-48-stepper-motor-with-uln2003-driver-and-arduino-uno/
+// 1 rev : 4076 step
+const unsigned long STEPS_PER_REV = 4076;
+const unsigned long SHAKE_HEAD_DEGREE = 15;
+const float COLLISION_WARN_DISTANCE = 8.0;
+const float COLLISION_SAFE_DISTANCE = 16.0;
+int _CurState = 0;
+const int STATE_WALK = 0;
+const int STATE_CHECK = 1;
+const int SAFE_COUNTER = 8;
+//const int _PrevRotation = 0; //0 : clockwise, 1: counterclockwise
+
+
 void setup() {
   pinMode(ULTRASONIC_TRIGGER, OUTPUT);
   pinMode(ULTRASONIC_ECHO, INPUT);
@@ -99,8 +114,13 @@ float getDistance() {
 }
 
 
+float stepsFromDegree(float degree) {
+  return 4076.0 * (degree/360.0);
+}
+
+
+
 void loop() {
-  
   handleSignal();  // check if recieve next signal
   
   // if power button is clicked, toggle power status
@@ -111,37 +131,93 @@ void loop() {
   }
   
   if (_PowerOn) {
-    // check distance every 1/4 second
+    // check distance every 50 ms
     if (millis()- ULTRASONIC_LAST > 50) {
       float distance = getDistance();  // check distance from the front object
       
-      if (distance >= 25.0) {
-        _CurSignal = SIGNAL_FORWARD;
-        
+      if (distance < COLLISION_WARN_DISTANCE) {
+        _CurState = STATE_CHECK;
       } else {
-        _CurSignal = SIGNAL_LEFT;
+        _CurState = STATE_WALK;
       }
-      
       ULTRASONIC_LAST = millis();
     }
-    
-    // Drive motor in sequences between step1 to step8
-    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
-    switch(_CurSignal) {
-      case SIGNAL_FORWARD:
-        forward(_CurPhase);
-        break;
-      case SIGNAL_LEFT:
+
+    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;    
+    if (STATE_WALK == _CurState) {
+      // Drive motor in sequences between step1 to step8
+      switch(_CurSignal) {
+        case SIGNAL_FORWARD:
+          forward(_CurPhase);
+          break;
+        case SIGNAL_LEFT:
+          left(_CurPhase);
+          break;
+        case SIGNAL_BACKWARD:
+          backward(_CurPhase);
+          break;
+        case SIGNAL_RIGHT:
+          right(_CurPhase);
+          break;        
+        default:
+          break;
+      }
+    } else {
+      long steps = stepsFromDegree(SHAKE_HEAD_DEGREE);
+      while (steps-- >=0) {
+        _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
         left(_CurPhase);
-        break;
-      case SIGNAL_BACKWARD:
-        backward(_CurPhase);
-        break;
-      case SIGNAL_RIGHT:
+      }
+      float dist1 = getDistance();
+      Serial.print("check - distance: ");
+      Serial.print(dist1);
+      
+      steps = stepsFromDegree(2 * SHAKE_HEAD_DEGREE);
+      while (steps-- >=0) {
+        _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
         right(_CurPhase);
-        break;        
-      default:
-        break;
+      }
+      
+      float dist2 = getDistance();
+      Serial.print("check + distance: ");
+      Serial.print(dist2);
+      
+      unsigned long lastDetect = millis();
+      int safeCounter = 0;
+      while(millis() - lastDetect  < 20000) {
+        handleSignal();
+        if (SIGNAL_POWER == _CurSignal) {  
+          break;
+        }
+        // left can reach more. so we go left
+        steps = stepsFromDegree(SHAKE_HEAD_DEGREE);
+        while (steps-- >=0) {      
+            _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+            if (dist1 > dist2) {
+              left(_CurPhase);
+            } else {
+              right(_CurPhase);
+            }
+        }
+        float curDist = getDistance();
+        if (curDist >= COLLISION_SAFE_DISTANCE) {
+          safeCounter++;
+          if (4 == safeCounter) {
+            // it's really safe. turn back and go
+            steps = (safeCounter / 2) * SHAKE_HEAD_DEGREE;
+            while (steps-- >=0) {      
+                _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+                if (dist1 > dist2) {
+                  right(_CurPhase);
+                } else {
+                  left(_CurPhase);
+                }
+            }
+            _CurState = STATE_WALK;
+            break;
+          }
+        }
+      }
     }
   }
 }
