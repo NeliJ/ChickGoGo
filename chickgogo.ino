@@ -49,12 +49,10 @@ decode_results _Results;
 // use this value to trace the current step for stepper
 int _CurPhase = 0; 
 
-
-
 //http://42bots.com/tutorials/28byj-48-stepper-motor-with-uln2003-driver-and-arduino-uno/
 // 1 rev : 4076 step
 const unsigned long STEPS_PER_REV = 4076;
-const unsigned long SHAKE_HEAD_DEGREE = 15;
+const unsigned long SHAKE_HEAD_DEGREE = 13;
 const float COLLISION_WARN_DISTANCE = 8.0;
 const float COLLISION_SAFE_DISTANCE = 16.0;
 int _CurState = 0;
@@ -82,44 +80,6 @@ void setup() {
   Serial.begin(9600);
 }
 
-void handleSignal() {
-  if (_Irrecv.decode(&_Results)) {
-    // Handle next infrared signal with interval greater than 250 ms
-    if (millis() - _Last > 250) {
-      long signal = dumpSignal(&_Results);
-      if (isValidSignal(signal)) {
-        _CurSignal = signal;
-      }
-    }
-    _Last = millis();
-    _Irrecv.resume();  // Receive the next value    
-  }
-}
-
-
-float getDistance() {
-  digitalWrite(ULTRASONIC_TRIGGER, LOW);
-  delayMicroseconds(5);
-  digitalWrite(ULTRASONIC_TRIGGER, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(ULTRASONIC_TRIGGER, LOW);
-  
-  float distance = pulseIn(ULTRASONIC_ECHO, HIGH);
-  distance *= 0.01657;
-  
-  Serial.print(distance);
-  Serial.println(" cm");
-  //delay(50);
-  return distance;
-}
-
-
-float stepsFromDegree(float degree) {
-  return 4076.0 * (degree/360.0);
-}
-
-
-
 void loop() {
   handleSignal();  // check if recieve next signal
   
@@ -131,6 +91,8 @@ void loop() {
   }
   
   if (_PowerOn) {
+    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0; 
+    
     // check distance every 50 ms
     if (millis()- ULTRASONIC_LAST > 50) {
       float distance = getDistance();  // check distance from the front object
@@ -143,8 +105,16 @@ void loop() {
       ULTRASONIC_LAST = millis();
     }
 
-    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;    
     if (STATE_WALK == _CurState) {
+      processWalk();
+    } else {
+      processCollision();
+    }
+  }
+}
+
+// handle walking when collision is not happened
+void processWalk() {
       // Drive motor in sequences between step1 to step8
       switch(_CurSignal) {
         case SIGNAL_FORWARD:
@@ -162,63 +132,80 @@ void loop() {
         default:
           break;
       }
-    } else {
-      long steps = stepsFromDegree(SHAKE_HEAD_DEGREE);
-      while (steps-- >=0) {
-        _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+}
+
+// handle movement when collision is happend
+void processCollision() { 
+  // turn left degree of SHAKE_HEAD_DEGREE
+  long steps = stepsFromDegree(SHAKE_HEAD_DEGREE);
+  while (steps-- >=0) {
+    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+    left(_CurPhase);
+  }
+  float leftDiffDistance = getDistance();
+
+  // turn right degree of SHAKE_HEAD_DEGREE. 
+  // 1*SHAKE_HEAD_DEGREE is for turning back to initial position
+  steps = stepsFromDegree(2 * SHAKE_HEAD_DEGREE);
+  while (steps-- >=0) {
+    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+    right(_CurPhase);
+  }
+  float rightDiffDistance = getDistance();  
+  
+  unsigned long lastDetect = millis();
+  int safeCounter = 0;
+  while(millis() - lastDetect  < 20000) {
+    handleSignal();
+    if (SIGNAL_POWER == _CurSignal) {  
+      break;
+    }
+    // left can reach more. so we go left
+    steps = stepsFromDegree(SHAKE_HEAD_DEGREE);
+    while (steps-- >=0) {      
+      _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+      if (leftDiffDistance > rightDiffDistance) {
         left(_CurPhase);
-      }
-      float dist1 = getDistance();
-      Serial.print("check - distance: ");
-      Serial.print(dist1);
-      
-      steps = stepsFromDegree(2 * SHAKE_HEAD_DEGREE);
-      while (steps-- >=0) {
-        _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+      } else {
         right(_CurPhase);
       }
-      
-      float dist2 = getDistance();
-      Serial.print("check + distance: ");
-      Serial.print(dist2);
-      
-      unsigned long lastDetect = millis();
-      int safeCounter = 0;
-      while(millis() - lastDetect  < 20000) {
-        handleSignal();
-        if (SIGNAL_POWER == _CurSignal) {  
-          break;
-        }
-        // left can reach more. so we go left
-        steps = stepsFromDegree(SHAKE_HEAD_DEGREE);
+    }
+    
+    float curDist = getDistance();
+    if (curDist >= COLLISION_SAFE_DISTANCE) {
+      safeCounter++;
+      if (SAFE_COUNTER == safeCounter) {
+        // it's really safe. turn back and go
+        steps = stepsFromDegree((safeCounter / 2) * SHAKE_HEAD_DEGREE);
         while (steps-- >=0) {      
             _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
-            if (dist1 > dist2) {
-              left(_CurPhase);
-            } else {
+            if (leftDiffDistance > rightDiffDistance) {
               right(_CurPhase);
+            } else {
+              left(_CurPhase);
             }
         }
-        float curDist = getDistance();
-        if (curDist >= COLLISION_SAFE_DISTANCE) {
-          safeCounter++;
-          if (4 == safeCounter) {
-            // it's really safe. turn back and go
-            steps = (safeCounter / 2) * SHAKE_HEAD_DEGREE;
-            while (steps-- >=0) {      
-                _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
-                if (dist1 > dist2) {
-                  right(_CurPhase);
-                } else {
-                  left(_CurPhase);
-                }
-            }
-            _CurState = STATE_WALK;
-            break;
-          }
-        }
+        _CurState = STATE_WALK;
+        break;
       }
     }
+  }
+}
+
+/*
+ * Handle signal from infrared sensor
+ */
+void handleSignal() {
+  if (_Irrecv.decode(&_Results)) {
+    // Handle next infrared signal with interval greater than 250 ms
+    if (millis() - _Last > 250) {
+      long signal = dumpSignal(&_Results);
+      if (isValidSignal(signal)) {
+        _CurSignal = signal;
+      }
+    }
+    _Last = millis();
+    _Irrecv.resume();  // Receive the next value    
   }
 }
 
@@ -247,6 +234,32 @@ long dumpSignal(decode_results *results) {
   return targetSignal;
 }
 
+/*
+ * Detect distance from ultrasonic sensor
+ */
+float getDistance() {
+  digitalWrite(ULTRASONIC_TRIGGER, LOW);
+  delayMicroseconds(5);
+  digitalWrite(ULTRASONIC_TRIGGER, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(ULTRASONIC_TRIGGER, LOW);
+  
+  float distance = pulseIn(ULTRASONIC_ECHO, HIGH);
+  distance *= 0.01657;
+  
+  Serial.print(distance);
+  Serial.println(" cm");
+  //delay(50);
+  return distance;
+}
+
+float stepsFromDegree(float degree) {
+  return 4076.0 * (degree/360.0);
+}
+
+/*
+ * Handle 28BYJ-48 Stepper motor
+ */
 // We place the two stepper in opposite direction, so we need to
 // drive it in the opposite direction too
 void backward(int phase) {
