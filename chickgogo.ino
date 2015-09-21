@@ -28,7 +28,7 @@ const long SIGNAL_LEFT = 0x00FF22DD;
 const long SIGNAL_RIGHT = 0x00FFC23D;
 const long SIGNAL_POWER= 0x00FFA25D;
 const long SIGNAL_INVALID = 0x00000000;
-const int SIGNALS_LENGTH = 6;
+const int SIGNALS_LENGTH = 5;
 
 // define the available values which handled by our codes
 const long SIGNALS[SIGNALS_LENGTH] = { 
@@ -58,7 +58,7 @@ const float COLLISION_SAFE_DISTANCE = 16.0;
 int _CurState = 0;
 const int STATE_WALK = 0;
 const int STATE_CHECK = 1;
-const int SAFE_COUNTER = 8;
+const int SAFE_COUNTER = 4;
 //const int _PrevRotation = 0; //0 : clockwise, 1: counterclockwise
 
 
@@ -89,7 +89,7 @@ void loop() {
     _PowerOn = !_PowerOn;
     _CurSignal = SIGNAL_FORWARD;
   }
-  
+
   if (_PowerOn) {
     _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0; 
     
@@ -115,6 +115,8 @@ void loop() {
 
 // handle walking when collision is not happened
 void processWalk() {
+//  Serial.print("processWalk Current Signal: ");
+//  Serial.println(_CurSignal, HEX);  
       // Drive motor in sequences between step1 to step8
       switch(_CurSignal) {
         case SIGNAL_FORWARD:
@@ -157,6 +159,10 @@ void processCollision() {
   int safeCounter = 0;
   while(millis() - lastDetect  < 20000) {
     handleSignal();
+    
+//    Serial.print("processCollision Current Signal: ");
+//    Serial.println(_CurSignal, HEX);  
+    
     if (SIGNAL_POWER == _CurSignal) {  
       break;
     }
@@ -175,16 +181,16 @@ void processCollision() {
     if (curDist >= COLLISION_SAFE_DISTANCE) {
       safeCounter++;
       if (SAFE_COUNTER == safeCounter) {
-        // it's really safe. turn back and go
-        steps = stepsFromDegree((safeCounter / 2) * SHAKE_HEAD_DEGREE);
-        while (steps-- >=0) {      
-            _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
-            if (leftDiffDistance > rightDiffDistance) {
-              right(_CurPhase);
-            } else {
-              left(_CurPhase);
-            }
-        }
+//        // it's really safe. turn back and go
+//        steps = stepsFromDegree((safeCounter / 2) * SHAKE_HEAD_DEGREE);
+//        while (steps-- >=0) {      
+//            _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+//            if (leftDiffDistance > rightDiffDistance) {
+//              right(_CurPhase);
+//            } else {
+//              left(_CurPhase);
+//            }
+//        }
         _CurState = STATE_WALK;
         break;
       }
@@ -201,7 +207,12 @@ void handleSignal() {
     if (millis() - _Last > 250) {
       long signal = dumpSignal(&_Results);
       if (isValidSignal(signal)) {
+        Serial.print("Set signal to ");
+        Serial.println(signal, HEX);
         _CurSignal = signal;
+      } else {
+        Serial.print("keep signal ");
+        Serial.println(_CurSignal);
       }
     }
     _Last = millis();
@@ -247,8 +258,8 @@ float getDistance() {
   float distance = pulseIn(ULTRASONIC_ECHO, HIGH);
   distance *= 0.01657;
   
-  Serial.print(distance);
-  Serial.println(" cm");
+//  Serial.print(distance);
+//  Serial.println(" cm");
   //delay(50);
   return distance;
 }
