@@ -115,8 +115,6 @@ void loop() {
 
 // handle walking when collision is not happened
 void processWalk() {
-//  Serial.print("processWalk Current Signal: ");
-//  Serial.println(_CurSignal, HEX);  
       // Drive motor in sequences between step1 to step8
       switch(_CurSignal) {
         case SIGNAL_FORWARD:
@@ -159,9 +157,6 @@ void processCollision() {
   int safeCounter = 0;
   while(millis() - lastDetect  < 20000) {
     handleSignal();
-    
-//    Serial.print("processCollision Current Signal: ");
-//    Serial.println(_CurSignal, HEX);  
     
     if (SIGNAL_POWER == _CurSignal) {  
       break;
@@ -207,12 +202,7 @@ void handleSignal() {
     if (millis() - _Last > 250) {
       long signal = dumpSignal(&_Results);
       if (isValidSignal(signal)) {
-        Serial.print("Set signal to ");
-        Serial.println(signal, HEX);
         _CurSignal = signal;
-      } else {
-        Serial.print("keep signal ");
-        Serial.println(_CurSignal);
       }
     }
     _Last = millis();
