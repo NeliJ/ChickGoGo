@@ -1,9 +1,9 @@
 #include <IRremote.h>
 
-
+// Specify UltraSonic sensor pins
 const int ULTRASONIC_TRIGGER = 2;
 const int ULTRASONIC_ECHO = 3;
-unsigned long ULTRASONIC_LAST = 0;
+unsigned long _UltrasonicLast = 0;
 
 // Specify the ULN2003 IN1,IN2,IN3,IN4 mapping to Arduino 8,9,10,11
 const int MOTOR1PIN1 = 8;
@@ -28,7 +28,7 @@ const long SIGNAL_LEFT = 0x00FF22DD;
 const long SIGNAL_RIGHT = 0x00FFC23D;
 const long SIGNAL_POWER= 0x00FFA25D;
 const long SIGNAL_INVALID = 0x00000000;
-const int SIGNALS_LENGTH = 5;
+const int  SIGNALS_LENGTH = 5;
 
 // define the available values which handled by our codes
 const long SIGNALS[SIGNALS_LENGTH] = { 
@@ -41,7 +41,7 @@ long _CurSignal = 0x00000000;
 // if power is off, we don't handle infrared signal. 0: off 1: on
 int _PowerOn = 0;
 
-unsigned long _Last = millis();
+unsigned long _InfraredLast = millis();
 
 IRrecv _Irrecv(IR_PIN);
 decode_results _Results;
@@ -59,8 +59,6 @@ int _CurState = 0;
 const int STATE_WALK = 0;
 const int STATE_CHECK = 1;
 const int SAFE_COUNTER = 4;
-//const int _PrevRotation = 0; //0 : clockwise, 1: counterclockwise
-
 
 void setup() {
   pinMode(ULTRASONIC_TRIGGER, OUTPUT);
@@ -94,14 +92,14 @@ void loop() {
 
   if (_PowerOn) {
     // check distance every 50 ms
-    if (millis()- ULTRASONIC_LAST > 50) {
-      float distance = getDistance();  // check distance from the front object
+    if (millis()- _UltrasonicLast > 50) {
+      float distance = getDistance(); // distance from the front object
       if (distance < COLLISION_WARN_DISTANCE) {
         _CurState = STATE_CHECK;
       } else {
         _CurState = STATE_WALK;
       }
-      ULTRASONIC_LAST = millis();
+      _UltrasonicLast = millis();
     }
 
     if (STATE_WALK == _CurState) {
@@ -117,23 +115,23 @@ void loop() {
 
 // handle walking when collision is not happened
 void walk(long signal, int aStep) {
-      // Drive motor in sequences between step1 to step8
-      switch(signal) {
-        case SIGNAL_FORWARD:
-          forward(aStep);
-          break;
-        case SIGNAL_LEFT:
-          left(aStep);
-          break;
-        case SIGNAL_BACKWARD:
-          backward(aStep);
-          break;
-        case SIGNAL_RIGHT:
-          right(aStep);
-          break;        
-        default:
-          break;
-      }
+  // Drive motor in sequences between step1 to step8
+  switch(signal) {
+    case SIGNAL_FORWARD:
+      forward(aStep);
+      break;
+    case SIGNAL_LEFT:
+      left(aStep);
+      break;
+    case SIGNAL_BACKWARD:
+      backward(aStep);
+      break;
+    case SIGNAL_RIGHT:
+      right(aStep);
+      break;        
+    default:
+      break;
+  }
 }
 
 // handle movement when collision is happend
@@ -202,13 +200,13 @@ long getIRSignal() {
   long curSignal = SIGNAL_INVALID;
   if (_Irrecv.decode(&_Results)) {
     // Handle next infrared signal with interval greater than 250 ms
-    if (millis() - _Last > 250) {
+    if (millis() - _InfraredLast > 250) {
       long signal = dumpSignal(&_Results);
       if (isValidIRSignal(signal)) {
         curSignal = signal;
       }
     }
-    _Last = millis();
+    _InfraredLast = millis();
     _Irrecv.resume();  // Receive the next value    
   }
   return curSignal;
