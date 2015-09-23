@@ -47,7 +47,7 @@ IRrecv _Irrecv(IR_PIN);
 decode_results _Results;
 
 // use this value to trace the current step for stepper
-int _CurPhase = 0; 
+int _CurStep = 0; 
 
 //http://42bots.com/tutorials/28byj-48-stepper-motor-with-uln2003-driver-and-arduino-uno/
 // 1 rev : 4076 step
@@ -81,22 +81,21 @@ void setup() {
 }
 
 void loop() {
-  handleSignal();  // check if recieve next signal
+  long signal = getIRSignal();  // check if recieve next signal
   
   // if power button is clicked, toggle power status
   // Set the robot going forward if power is on
-  if (SIGNAL_POWER == _CurSignal) {  
-    _PowerOn = !_PowerOn;
+  if (SIGNAL_POWER == signal) {  
+    _PowerOn = !_PowerOn;    
     _CurSignal = SIGNAL_FORWARD;
+  } else if (SIGNAL_INVALID != signal) {
+    _CurSignal = signal;
   }
 
   if (_PowerOn) {
-    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0; 
-    
     // check distance every 50 ms
     if (millis()- ULTRASONIC_LAST > 50) {
       float distance = getDistance();  // check distance from the front object
-      
       if (distance < COLLISION_WARN_DISTANCE) {
         _CurState = STATE_CHECK;
       } else {
@@ -106,28 +105,31 @@ void loop() {
     }
 
     if (STATE_WALK == _CurState) {
-      processWalk();
+      _CurStep = _CurStep+1 < 8 ?  _CurStep+1 : 0;
+      walk(_CurSignal, _CurStep);
     } else {
-      processCollision();
+      evade();
+      _CurState = STATE_WALK;  
+      _CurSignal = SIGNAL_FORWARD;
     }
   }
 }
 
 // handle walking when collision is not happened
-void processWalk() {
+void walk(long signal, int aStep) {
       // Drive motor in sequences between step1 to step8
-      switch(_CurSignal) {
+      switch(signal) {
         case SIGNAL_FORWARD:
-          forward(_CurPhase);
+          forward(aStep);
           break;
         case SIGNAL_LEFT:
-          left(_CurPhase);
+          left(aStep);
           break;
         case SIGNAL_BACKWARD:
-          backward(_CurPhase);
+          backward(aStep);
           break;
         case SIGNAL_RIGHT:
-          right(_CurPhase);
+          right(aStep);
           break;        
         default:
           break;
@@ -135,12 +137,13 @@ void processWalk() {
 }
 
 // handle movement when collision is happend
-void processCollision() { 
+void evade() { 
+  int aStep = 0;
   // turn left degree of SHAKE_HEAD_DEGREE
   long steps = stepsFromDegree(SHAKE_HEAD_DEGREE);
   while (steps-- >=0) {
-    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
-    left(_CurPhase);
+    aStep = aStep+1 < 8 ?  aStep+1 : 0;
+    left(aStep);
   }
   float leftDiffDistance = getDistance();
 
@@ -148,27 +151,27 @@ void processCollision() {
   // 1*SHAKE_HEAD_DEGREE is for turning back to initial position
   steps = stepsFromDegree(2 * SHAKE_HEAD_DEGREE);
   while (steps-- >=0) {
-    _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
-    right(_CurPhase);
+    aStep = aStep+1 < 8 ?  aStep+1 : 0;
+    right(aStep);
   }
   float rightDiffDistance = getDistance();  
   
   unsigned long lastDetect = millis();
   int safeCounter = 0;
   while(millis() - lastDetect  < 20000) {
-    handleSignal();
-    
-    if (SIGNAL_POWER == _CurSignal) {  
+    long signal = getIRSignal();  // check if recieve next signal
+    if (SIGNAL_POWER == signal) {
       break;
     }
+    
     // left can reach more. so we go left
     steps = stepsFromDegree(SHAKE_HEAD_DEGREE);
     while (steps-- >=0) {      
-      _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+      aStep = aStep+1 < 8 ?  aStep+1 : 0;
       if (leftDiffDistance > rightDiffDistance) {
-        left(_CurPhase);
+        left(aStep);
       } else {
-        right(_CurPhase);
+        right(aStep);
       }
     }
     
@@ -179,14 +182,13 @@ void processCollision() {
 //        // it's really safe. turn back and go
 //        steps = stepsFromDegree((safeCounter / 2) * SHAKE_HEAD_DEGREE);
 //        while (steps-- >=0) {      
-//            _CurPhase = _CurPhase+1 < 8 ?  _CurPhase+1 : 0;
+//            aStep = aStep+1 < 8 ?  aStep+1 : 0;
 //            if (leftDiffDistance > rightDiffDistance) {
-//              right(_CurPhase);
+//              right(aStep);
 //            } else {
-//              left(_CurPhase);
+//              left(aStep);
 //            }
 //        }
-        _CurState = STATE_WALK;
         break;
       }
     }
@@ -196,21 +198,23 @@ void processCollision() {
 /*
  * Handle signal from infrared sensor
  */
-void handleSignal() {
+long getIRSignal() {
+  long curSignal = SIGNAL_INVALID;
   if (_Irrecv.decode(&_Results)) {
     // Handle next infrared signal with interval greater than 250 ms
     if (millis() - _Last > 250) {
       long signal = dumpSignal(&_Results);
-      if (isValidSignal(signal)) {
-        _CurSignal = signal;
+      if (isValidIRSignal(signal)) {
+        curSignal = signal;
       }
     }
     _Last = millis();
     _Irrecv.resume();  // Receive the next value    
   }
+  return curSignal;
 }
 
-bool isValidSignal(long signal) {
+bool isValidIRSignal(long signal) {
   bool isValid = false;
   for (int i=0; i<SIGNALS_LENGTH;i++) {
     if (signal == SIGNALS[i]) {
